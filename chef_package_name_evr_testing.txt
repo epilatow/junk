@@ -1,0 +1,70 @@
+#
+# generate two packages to simulate the grub2-efi-x64 udpate failure
+# empty-test-rpm-2.02-78.el8.x86_64.rpm
+# empty-test-rpm-2.02-78.el8_1.1.x86_64.rpm
+#
+tmp=$(mktemp -d)
+cd $tmp
+name=empty-test-rpm
+arch=x86_64
+for release in 78.el8 78.el8_1.1; do
+  cat > rpm.spec <<-EOF
+Summary: $name
+Name: $name
+Epoch: 1
+Version: 2.02
+Release: $release
+BuildArch: $arch
+License: None
+%description
+$name
+%files
+EOF
+  /usr/bin/rpmbuild -bb --define "_topdir ./tmp" --define "_rpmdir ." rpm.spec
+  mv $arch/*.rpm .
+  rm -rf tmp $arch rpm.spec
+done
+
+#
+# setup a repo containing the new packages.
+#
+createrepo .
+sudo sh -c "cat > /etc/yum.repos.d/local.repo <<-EOF
+[LocalRepo_BaseOS]
+name=LocalRepo_BaseOS
+metadata_expire=-1
+enabled=1
+gpgcheck=0
+baseurl=file://$tmp
+EOF"
+
+#
+# make sure dnf can see the packages
+#
+sudo dnf repoquery empty-test-rpm
+
+#
+# try using a package resource to install to the latest package
+#
+sudo dnf install -y empty-test-rpm-1:2.02-78.el8
+cat > /tmp/pkg_update.rb <<-EOF
+package 'empty-test-rpm upgrade test' do
+  package_name 'empty-test-rpm-1:2.02-78.el8_1.1'
+  action :install
+end
+EOF
+sudo chef-apply /tmp/pkg_update.rb
+rpm -qi empty-test-rpm
+
+#
+# try using a package resource to update to the latest package
+#
+sudo dnf install -y empty-test-rpm-1:2.02-78.el8
+cat > /tmp/pkg_update.rb <<-EOF
+package 'empty-test-rpm upgrade test' do
+  package_name 'empty-test-rpm-1:2.02-78.el8_1.1'
+  action :upgrade
+end
+EOF
+sudo chef-apply /tmp/pkg_update.rb
+rpm -qi empty-test-rpm
